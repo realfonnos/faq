@@ -1,0 +1,300 @@
+
+    function filteredItems(){
+      return state.items.filter(it => {
+        const tagOk = state.activeTag ? (it.tags||[]).includes(state.activeTag) : true;
+        const searchOk = matches(it, state.search);
+        // visibility "unlisted" bleibt in der Liste, ist aber optional für spätere Erweiterung
+        return tagOk && searchOk;
+      });
+    }
+
+    function renderTags(){
+      const tags = getAllTags(state.items);
+      tagChips.innerHTML = "";
+
+      const all = document.createElement("button");
+      all.className = "chip" + (state.activeTag ? "" : " on");
+      all.type = "button";
+      all.textContent = "Alle";
+      all.onclick = () => { state.activeTag = null; render(); };
+      tagChips.appendChild(all);
+
+      tags.forEach(t => {
+        const b = document.createElement("button");
+        b.className = "chip" + (state.activeTag === t ? " on" : "");
+        b.type = "button";
+        b.textContent = t;
+        b.onclick = () => {
+          state.activeTag = (state.activeTag === t) ? null : t;
+          render();
+        };
+        tagChips.appendChild(b);
+      });
+    }
+
+    function renderFaq(){
+      const items = filteredItems();
+      count.textContent = String(items.length);
+      faqList.innerHTML = "";
+
+      if(items.length === 0){
+        emptyState.classList.remove("hidden");
+        return;
+      } else {
+        emptyState.classList.add("hidden");
+      }
+
+      items.forEach(it => {
+        const d = document.createElement("details");
+        d.className = "faq";
+
+        const s = document.createElement("summary");
+        const left = document.createElement("span");
+        left.textContent = it.q;
+
+        const meta = document.createElement("span");
+        meta.className = "meta";
+        meta.innerHTML = `
+          ${(it.tags||[]).slice(0,3).map(t=>`#${escapeHtml(t)}`).join(" ")}
+          ${it.visibility === "unlisted" ? " · unlisted" : ""}
+        `;
+
+        s.appendChild(left);
+        s.appendChild(meta);
+
+        const a = document.createElement("div");
+        a.className = "answer";
+        a.textContent = it.a;
+
+        d.appendChild(s);
+        d.appendChild(a);
+        faqList.appendChild(d);
+      });
+    }
+
+    function renderAdminList(){
+      adminList.innerHTML = "";
+      state.items.forEach((it, idx) => {
+        const row = document.createElement("div");
+        row.className = "item";
+
+        const left = document.createElement("div");
+        left.className = "left";
+        left.innerHTML = `
+          <div class="q" title="${escapeAttr(it.q)}">${escapeHtml(it.q)}</div>
+          <div class="t">#${escapeHtml((it.tags||[]).join(", ") || "—")} · ${escapeHtml(it.visibility||"public")}</div>
+        `;
+
+        const actions = document.createElement("div");
+        actions.className = "actions";
+
+        const bEdit = mkBtn("Bearbeiten", "mini", () => startEdit(it.id));
+        const bUp = mkBtn("↑", "mini", () => move(idx, -1));
+        const bDown = mkBtn("↓", "mini", () => move(idx, +1));
+
+        actions.append(bEdit, bUp, bDown);
+
+        row.append(left, actions);
+        adminList.appendChild(row);
+      });
+    }
+
+    function mkBtn(text, cls, onClick){
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = text;
+      b.className = cls;
+      b.onclick = onClick;
+      return b;
+    }
+
+    function escapeHtml(str){
+      return (str ?? "").toString()
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
+    }
+    function escapeAttr(str){ return escapeHtml(str).replaceAll("\n"," "); }
+
+    function render(){
+      save();
+      adminPanel.classList.toggle("hidden", !state.adminVisible);
+      btnToggleAdmin.textContent = "Admin: " + (state.adminVisible ? "Ein" : "Aus");
+      btnToggleAdmin.classList.toggle("primary", state.adminVisible);
+
+      renderTags();
+      renderFaq();
+      renderAdminList();
+    }
+
+    // ========= Admin actions =========
+    function clearForm(){
+      editId.value = "";
+      inQ.value = "";
+      inA.value = "";
+      inTags.value = "";
+      inVis.value = "public";
+      btnDelete.classList.add("hidden");
+      el("btnSave").textContent = "Speichern";
+    }
+
+    function startEdit(id){
+      const it = state.items.find(x => x.id === id);
+      if(!it) return;
+      editId.value = it.id;
+      inQ.value = it.q;
+      inA.value = it.a;
+      inTags.value = (it.tags||[]).join(", ");
+      inVis.value = it.visibility || "public";
+      btnDelete.classList.remove("hidden");
+      el("btnSave").textContent = "Änderungen speichern";
+      showToast("Eintrag geladen.");
+      // Auf kleinen Screens: Admin Panel sichtbar machen & zum Formular scrollen
+      if(!state.adminVisible){ state.adminVisible = true; }
+      setTimeout(()=> form.scrollIntoView({behavior:"smooth", block:"start"}), 50);
+    }
+
+    function upsertFromForm(){
+      const q = inQ.value.trim();
+      const a = inA.value.trim();
+      const tags = inTags.value.split(",").map(t=>t.trim()).filter(Boolean);
+      const visibility = inVis.value;
+
+      if(!q || !a) return;
+
+      const id = editId.value;
+      if(id){
+        const it = state.items.find(x => x.id === id);
+        if(!it) return;
+        it.q = q; it.a = a; it.tags = tags; it.visibility = visibility;
+        showToast("Gespeichert.");
+      } else {
+        state.items.unshift({ id: uid(), q, a, tags, visibility });
+        showToast("Hinzugefügt.");
+      }
+      clearForm();
+      render();
+    }
+
+    function removeCurrent(){
+      const id = editId.value;
+      if(!id) return;
+      const it = state.items.find(x=>x.id===id);
+      if(!it) return;
+      const ok = confirm("Eintrag wirklich löschen?\n\n" + it.q);
+      if(!ok) return;
+
+      state.items = state.items.filter(x=>x.id!==id);
+      clearForm();
+      render();
+      showToast("Gelöscht.");
+    }
+
+    function move(index, dir){
+      const j = index + dir;
+      if(j < 0 || j >= state.items.length) return;
+      const arr = state.items;
+      [arr[index], arr[j]] = [arr[j], arr[index]];
+      render();
+    }
+
+    function exportJson(){
+      const data = JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), items: state.items }, null, 2);
+      // Download ohne Server
+      const blob = new Blob([data], {type:"application/json"});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "faq-export.json";
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("Export gestartet.");
+    }
+
+    async function importJson(){
+      const pick = document.createElement("input");
+      pick.type = "file";
+      pick.accept = "application/json";
+      pick.onchange = async () => {
+        const file = pick.files?.[0];
+        if(!file) return;
+        const text = await file.text();
+        const obj = safeParse(text, null);
+        if(!obj || !Array.isArray(obj.items)){
+          alert("Ungültiges JSON. Erwartet: { items: [...] }");
+          return;
+        }
+        // Minimal sanitize
+        state.items = obj.items
+          .filter(x => x && typeof x.q === "string" && typeof x.a === "string")
+          .map(x => ({
+            id: typeof x.id === "string" ? x.id : uid(),
+            q: x.q.trim(),
+            a: x.a.trim(),
+            tags: Array.isArray(x.tags) ? x.tags.map(String) : [],
+            visibility: (x.visibility === "unlisted") ? "unlisted" : "public"
+          }));
+        clearForm();
+        render();
+        showToast("Import abgeschlossen.");
+      };
+      pick.click();
+    }
+
+    function resetAll(){
+      const ok = confirm("Demo-FAQs wiederherstellen und alle Änderungen löschen?");
+      if(!ok) return;
+      state.items = demo.slice();
+      state.activeTag = null;
+      state.search = "";
+      search.value = "";
+      clearForm();
+      render();
+      showToast("Zurückgesetzt.");
+    }
+
+    // ========= Events =========
+    btnToggleAdmin.addEventListener("click", () => {
+      state.adminVisible = !state.adminVisible;
+      render();
+    });
+
+    btnExport.addEventListener("click", exportJson);
+    btnImport.addEventListener("click", importJson);
+    btnReset.addEventListener("click", resetAll);
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      upsertFromForm();
+    });
+
+    btnNew.addEventListener("click", () => {
+      clearForm();
+      showToast("Neuer Eintrag.");
+    });
+
+    btnDelete.addEventListener("click", removeCurrent);
+
+    search.addEventListener("input", () => {
+      state.search = search.value;
+      renderFaq();
+    });
+
+    // Hotkey: Ctrl+K focus search
+    window.addEventListener("keydown", (e) => {
+      if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k"){
+        e.preventDefault();
+        search.focus();
+      }
+    });
+
+    // ========= Init =========
+    load();
+    // Ensure ids exist (if user imports older)
+    state.items = state.items.map(it => ({...it, id: it.id || uid(), tags: it.tags||[], visibility: it.visibility||"public"}));
+    render();
+  </script>
+</body>
+</html>
